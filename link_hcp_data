@@ -161,6 +161,7 @@ get_options()
 	        ;;
 	    --quiet)
                 quiet="TRUE"
+		index=$(( index + 1 ))
 		;;
             *)
                 echo "Unrecognized Option: ${argument}"
@@ -246,6 +247,7 @@ main()
 	    echo "${script_name}: WARNING - Current contents of ${dest_dir}/${subject} will be deleted."
 	    if utils_ShouldProceed 
 	    then
+		echo "${script_name}: INFO - Removing ${dest_dir}/${subject}"
 		chmod -R +w ${dest_dir}/${subject}
 		rm -rf${verbose_option} ${dest_dir}/${subject}
 	    else
@@ -254,6 +256,7 @@ main()
 	    fi
 	fi
 
+	echo "${script_name}: INFO - Creating links from ${dest_dir}/${subject} to ${source_dir}/${subject}"
 	cp -rs${verbose_option} ${source_dir}/${subject} ${dest_dir}
 	chmod -R +w ${dest_dir}
 	
