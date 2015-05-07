@@ -1,0 +1,274 @@
+#!/bin/bash
+
+#~ND~FORMAT~MARKDOWN
+#~ND~START~
+#
+# # link_hcp_data
+#
+# ## Description
+#
+# This script creates a directory tree of real directories containing symbolic links
+# to actual HCP data files. 
+#
+# ## Author(s)
+#
+# * Timothy B. Brown 
+#   (tbbrown at wustl dot edu)
+#   Neuroinformatics Research Group
+#   Washington University in St. Louis
+# 
+#~ND~END~
+
+utils_IsYes()
+{
+    answer="$1"
+    # lowercase the answer
+    answer=`echo $answer | tr '[:upper:]' '[:lower:]'`
+    if [ "$answer" = "y" ] || [ "$answer" = "yes" ]
+    then
+	return 0 # The answer is yes: True
+    else
+	return 1 # The answer is yes: False
+    fi
+}
+
+utils_ShouldProceed()
+{
+    echo -ne "Proceed? [n]: "
+    read proceed
+
+    if utils_IsYes $proceed
+    then
+	return 0 # Should proceed
+    else
+	return 1 # Should not proceed
+    fi
+}
+
+#
+# Function Description:
+#  Show usage information for this script
+#
+usage()
+{
+    echo ""
+    echo "  Create a directory tree in the dest_dir of real directories containing"
+    echo "  symbolic links to actual data files in the source_dir."
+    echo ""
+    echo "  Usage: ${script_name} <options>"
+    echo ""
+    echo "  Options: [ ] = optional; < > = user suppled value"
+    echo ""
+    echo "  [--help]              : show usage information and exit"
+    echo "  --source=<source_dir> : source directory (e.g. /s3/hcp)"
+    echo "  --dest=<dest_dir>     : destination directory (e.g. ${HOME}/data)"
+    echo "  [--subject=<subject>] : subject ID for which to create a linked directory"
+    echo "  [--subjlist=<file>]   : path to file containing subject IDs "
+    echo "                         for which to create linked directories"
+    echo ""
+    echo "  Note: You must supply either a --subject= or a --subjlist= option."
+    echo ""
+    echo "  [--stage={stage}]     : processing stage "
+    echo "    stage must be one of the following values"
+    echo ""
+    echo "    * unproc = unprocessed data only"
+    echo "    * struct = unprocessed data and structurally preprocessed data"
+    echo "    * proc   = unprocesed, structurally preprocessed, and fully processed data"
+    echo ""
+    echo "    stage defaults to unproc"
+    echo ""
+    echo "  [--quiet]             : by default ${script_name} shows verbose output"
+    echo "                          to show less output, use this option"
+    echo ""
+}
+
+#
+# Function Description:
+#  Get the command line options for this script.
+#
+# Global Output Variables:
+#  ${script_name} - name of this script
+#  ${source_dir}  - directory from which to link data
+#  ${dest_dir}    - directory in which to create linked directory tree
+#  ${subjects}    - space separated list of subject ids
+#  ${stage}       - indication of stage of data to create links for
+#  ${quiet}       - indication to be quiet (not show verbose output)
+#
+get_options() 
+{
+    local arguments=($@)
+
+    # initialize global output variables
+    unset script_name
+    unset source_dir
+    unset dest_dir
+    unset subjects
+    unset stage
+    unset quiet
+
+    # set default values for global output variables
+    script_name=$(basename ${0})    
+    stage="unproc"
+
+    # parse arguments
+    local index=0
+    local numArgs=${#arguments[@]}
+    local argument
+    unset errors
+
+    while [ ${index} -lt ${numArgs} ]
+    do
+        argument=${arguments[index]}
+	
+        case ${argument} in
+            --help)
+                usage
+                exit 1
+                ;;
+	    --source=*)
+                source_dir=${argument/*=/""}
+                index=$(( index + 1 ))
+                ;;
+            --dest=*)
+                dest_dir=${argument/*=/""}
+                index=$(( index + 1 ))
+                ;;
+	    --subject=*)
+	        if [ ! -z ${subjects} ]
+		then
+		    echo ""
+		    echo "--- ERROR: subjects specified multiple ways ---"
+		    errors="TRUE"
+		fi
+	        subjects=${argument/*=/""}
+                index=$(( index + 1 ))
+                ;;
+            --subjlist=*)
+	        if [ ! -z ${subjects} ]
+		then
+		    echo ""
+		    echo "--- ERROR: subjects specified multiple ways ---"
+		    errors="TRUE"
+		fi
+		subject_list_file=${argument/*=/""}
+		index=$(( index + 1 ))
+		list_from_file=( $( cat ${subject_list_file} ) )
+		subjects="`echo "${list_from_file[@]}"`"
+		;;
+            --stage=*)
+	        stage=${argument/*=/""}
+	        index=$(( index + 1 ))
+	        ;;
+	    --quiet)
+                quiet="TRUE"
+		;;
+            *)
+                echo "Unrecognized Option: ${argument}"
+                usage
+                exit 1
+                ;;
+	esac
+    done
+
+    # check required parameters
+
+    if [ -z "${source_dir}" ]
+    then
+	echo ""
+	echo "--- ERROR: --source= option is required. ---"
+	errors="TRUE"
+    fi
+
+    if [ -z "${dest_dir}" ]
+    then
+	echo ""
+	echo "--- ERROR: --dest= option is required. ---"
+	errors="TRUE"
+    fi
+
+    if [ -z "${subjects}" ]
+    then
+	echo ""
+	echo "--- ERROR: either --subject= or --subjlist= option is required"
+	errors="TRUE"
+    fi
+
+    if [ -z "${stage}" ]
+    then
+	echo ""
+	echo "--- ERROR: stage must be set. ---"
+	errors="TRUE"
+    fi
+
+    if [ "${stage}" != "unproc" -a "${stage}" != "struct" -a  "${stage}" != "proc" ]
+    then
+	echo ""
+	echo "--- ERROR: unrecognized stage value: ${stage} ---"
+	echo "---        stage must be one of: unproc, struct, proc"
+	errors="TRUE"
+    fi
+
+    if [ ! -z "${errors}" ]
+    then
+	usage
+	exit 1
+    fi
+}
+
+#
+# Function Description:
+#  Main processing of this script
+#
+#  Gets user specified command line options and performs linking
+#
+main()
+{
+    # Get Command Line Options
+    #
+    # Global Variables Set: See documentation for get_options function
+    get_options $@
+
+    verbose_option="v"
+
+    if [ ! -z "${quiet}" ]
+    then
+	verbose_option=""
+    fi
+
+    mkdir -p ${dest_dir}
+
+    for subject in $subjects
+    do
+	echo "${script_name}: Creating directory of links for subject ${subject} in ${dest_dir}"
+
+	if [ -e ${dest_dir}/${subject} ] 
+	then
+	    echo "${script_name}: WARNING - Current contents of ${dest_dir}/${subject} will be deleted."
+	    if utils_ShouldProceed 
+	    then
+		chmod -R +w ${dest_dir}/${subject}
+		rm -rf${verbose_option} ${dest_dir}/${subject}
+	    else
+		echo "${script_name}: INFO - Exiting without further deleting, creating, or linking."
+		exit 1
+	    fi
+	fi
+
+	cp -rs${verbose_option} ${source_dir}/${subject} ${dest_dir}
+	chmod -R +w ${dest_dir}
+	
+	if [ "${stage}" = "unproc" ] 
+	then
+	    rm -rf ${dest_dir}/${subject}/T1w
+	    rm -rf ${dest_dir}/${subject}/MNINonLinear
+	elif [ "${stage}" = "struct" ] 
+	then
+	    rm -rf ${dest_dir}/${subject}/MNINonLinear/Results
+	fi
+    done
+}
+
+#
+# Invoke the main function to get things started
+#
+main $@
