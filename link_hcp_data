@@ -257,14 +257,23 @@ main()
 	fi
 
 	echo "${script_name}: INFO - Creating links from ${dest_dir}/${subject} to ${source_dir}/${subject}"
-	cp -rs${verbose_option} ${source_dir}/${subject} ${dest_dir}
-	chmod -R +w ${dest_dir}
+
+	mkdir -p ${dest_dir}/${subject}/release-notes
+	cp -rs${verbose_option} ${source_dir}/${subject}/release-notes ${dest_dir}/${subject}
+	mkdir -p ${dest_dir}/${subject}/unprocessed
+	cp -rs${verbose_option} ${source_dir}/${subject}/unprocessed ${dest_dir}/${subject}
 	
-	if [ "${stage}" = "unproc" ] 
+	if [ "${stage}" = "struct" ] || [ "${stage}" = "proc" ]
 	then
-	    rm -rf ${dest_dir}/${subject}/T1w
-	    rm -rf ${dest_dir}/${subject}/MNINonLinear
-	elif [ "${stage}" = "struct" ] 
+	    mkdir -p ${dest_dir}/${subject}/T1w
+	    cp -rs${verbose_option} ${source_dir}/${subject}/T1w ${dest_dir}/${subject}
+	    mkdir -p ${dest_dir}/${subject}/MNINonLinear
+	    cp -rs${verbose_option} ${source_dir}/${subject}/MNINonLinear ${dest_dir}/${subject}
+	fi
+
+	chmod -R +w ${dest_dir}
+
+	if [ "${stage}" = "struct" ] 
 	then
 	    rm -rf ${dest_dir}/${subject}/MNINonLinear/Results
 	fi
