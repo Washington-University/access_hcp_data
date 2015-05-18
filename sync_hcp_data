@@ -1,0 +1,244 @@
+#!/bin/bash
+
+#~ND~FORMAT~MARKDOWN
+#~ND~START~
+#
+# # sync_hcp_data
+#
+# ## Description
+#
+# This script uses s3cmd to synchronize HCP data files for a specified list of subjects from the
+# HCP OpenAccess Amazon S3 bucket.
+#
+# This script assumes that s3cmd has already been configured with the necessary user credentials.
+#
+# ## Author(s)
+#
+# * Timothy B. Brown 
+#   (tbbrown at wustl dot edu)
+#   Neuroinformatics Research Group
+#   Washington University in St. Louis
+# 
+#~ND~END~
+
+utils_IsYes()
+{
+    answer="$1"
+    # lowercase the answer
+    answer=`echo $answer | tr '[:upper:]' '[:lower:]'`
+    if [ "$answer" = "y" ] || [ "$answer" = "yes" ]
+    then
+	return 0 # The answer is yes: True
+    else
+	return 1 # The answer is yes: False
+    fi
+}
+
+utils_ShouldProceed()
+{
+    echo -ne "Proceed? [n]: "
+    read proceed
+
+    if utils_IsYes $proceed
+    then
+	return 0 # Should proceed
+    else
+	return 1 # Should not proceed
+    fi
+}
+
+#
+# Function Description:
+#  Show usage information for this script
+#
+usage()
+{
+    echo ""
+    echo "  Synchronize the directory trees for HCP data for a list of subjects."
+    echo ""
+    echo "  Usage: ${script_name} <options>"
+    echo ""
+    echo "  Options: [ ] = optional; < > = user suppled value"
+    echo ""
+    echo "  [--help]              : show usage information and exit"
+    echo "  --dest=<dest_dir>     : destination directory (e.g. /mydata)"
+    echo "  [--subject=<subject>] : subject ID for data to synchronize"
+    echo "  [--subjlist=<file>]   : path to file containing subject IDs "
+    echo "                          for which to synchronize data"
+    echo ""
+    echo "  Note: You must supply either a --subject= or a --subjlist= option."
+    echo ""
+    echo "  [--stage={stage}]     : processing stage "
+    echo "    stage must be one of the following values"
+    echo ""
+    echo "    * unproc = unprocessed data only"
+    echo "    * struct = unprocessed data and structurally preprocessed data"
+    echo "    * proc   = unprocesed, structurally preprocessed, and fully processed data"
+    echo ""
+    echo "    stage defaults to unproc"
+    echo ""
+    echo "  [--quiet]             : by default ${script_name} shows verbose output"
+    echo "                          to show less output, use this option"
+    echo ""
+}
+
+#
+# Function Description:
+#  Get the command line options for this script.
+#
+# Global Output Variables:
+#  ${script_name} - name of this script
+#  ${dest_dir}    - directory into which to copy data
+#  ${subjects}    - space separated list of subject ids
+#  ${stage}       - indication of stage of data to create links for
+#
+get_options() 
+{
+    local arguments=($@)
+
+    # initialize global output variables
+    unset script_name
+    unset dest_dir
+    unset subjects
+    unset stage
+    #unset quiet
+
+    # set default values for global output variables
+    script_name=$(basename ${0})    
+    stage="unproc"
+
+    # parse arguments
+    local index=0
+    local numArgs=${#arguments[@]}
+    local argument
+    unset errors
+
+    while [ ${index} -lt ${numArgs} ]
+    do
+        argument=${arguments[index]}
+	
+        case ${argument} in
+            --help)
+                usage
+                exit 1
+                ;;
+            --dest=*)
+                dest_dir=${argument/*=/""}
+                index=$(( index + 1 ))
+                ;;
+	    --subject=*)
+	        if [ ! -z ${subjects} ]
+		then
+		    echo ""
+		    echo "--- ERROR: subjects specified multiple ways ---"
+		    errors="TRUE"
+		fi
+	        subjects=${argument/*=/""}
+                index=$(( index + 1 ))
+                ;;
+            --subjlist=*)
+	        if [ ! -z ${subjects} ]
+		then
+		    echo ""
+		    echo "--- ERROR: subjects specified multiple ways ---"
+		    errors="TRUE"
+		fi
+		subject_list_file=${argument/*=/""}
+		index=$(( index + 1 ))
+		list_from_file=( $( cat ${subject_list_file} ) )
+		subjects="`echo "${list_from_file[@]}"`"
+		;;
+            --stage=*)
+	        stage=${argument/*=/""}
+	        index=$(( index + 1 ))
+	        ;;
+            *)
+                echo "Unrecognized Option: ${argument}"
+                usage
+                exit 1
+                ;;
+	esac
+    done
+
+    # check required parameters
+
+    if [ -z "${dest_dir}" ]
+    then
+	echo ""
+	echo "--- ERROR: --dest= option is required. ---"
+	errors="TRUE"
+    fi
+
+    if [ -z "${subjects}" ]
+    then
+	echo ""
+	echo "--- ERROR: either --subject= or --subjlist= option is required"
+	errors="TRUE"
+    fi
+
+    if [ -z "${stage}" ]
+    then
+	echo ""
+	echo "--- ERROR: stage must be set. ---"
+	errors="TRUE"
+    fi
+
+    if [ "${stage}" != "unproc" -a "${stage}" != "struct" -a  "${stage}" != "proc" ]
+    then
+	echo ""
+	echo "--- ERROR: unrecognized stage value: ${stage} ---"
+	echo "---        stage must be one of: unproc, struct, proc"
+	errors="TRUE"
+    fi
+
+    if [ ! -z "${errors}" ]
+    then
+	usage
+	exit 1
+    fi
+}
+
+#
+# Function Description:
+#  Main processing of this script
+#
+#  Gets user specified command line options and performs copying
+#
+main()
+{
+    # Get Command Line Options
+    #
+    # Global Variables Set: See documentation for get_options function
+    get_options $@
+
+    mkdir -p ${dest_dir}
+
+    for subject in $subjects
+    do
+	echo "${script_name}: Synchronizing HCP OpenAccess data for subject ${subject} to ${dest_dir}"
+
+	mkdir -p ${dest_dir}/${subject}/release-notes
+	s3cmd sync s3://hcp-openaccess/HCP/${subject}/release-notes ${dest_dir}/${subject}
+
+	mkdir -p ${dest_dir}/${subject}/unprocessed
+	s3cmd sync s3://hcp-openaccess/HCP/${subject}/unprocessed ${dest_dir}/${subject}
+	
+	if [ "${stage}" = "struct" ] || [ "${stage}" = "proc" ]
+	then
+	    mkdir -p ${dest_dir}/${subject}/T1w
+	    s3cmd sync s3://hcp-openaccess/HCP/${subject}/T1w ${dest_dir}/${subject}
+	    mkdir -p ${dest_dir}/${subject}/MNINonLinear
+	    s3cmd sync s3://hcp-openaccess/HCP/${subject}/MNINonLinear ${dest_dir}/${subject}
+	fi
+
+	if [ "${stage}" = "struct" ] 
+	then
+	    rm -rf ${dest_dir}/${subject}/MNINonLinear/Results
+	fi
+    done
+}
+
+#
+# Invoke the main function to get things started
+#
+main $@
